@@ -1,0 +1,593 @@
+package com.equifax.personbatch;
+
+import javax.sql.DataSource;
+
+import org.springframework.batch.core.Job;
+import org.springframework.batch.core.Step;
+import org.springframework.batch.core.configuration.annotation.EnableBatchProcessing;
+import org.springframework.batch.core.configuration.annotation.JobBuilderFactory;
+import org.springframework.batch.core.configuration.annotation.StepBuilderFactory;
+import org.springframework.batch.core.configuration.annotation.StepScope;
+import org.springframework.batch.core.launch.support.RunIdIncrementer;
+import org.springframework.batch.item.database.BeanPropertyItemSqlParameterSourceProvider;
+import org.springframework.batch.item.database.JdbcBatchItemWriter;
+import org.springframework.batch.item.database.builder.JdbcBatchItemWriterBuilder;
+import org.springframework.batch.item.file.FlatFileItemReader;
+import org.springframework.batch.item.file.builder.FlatFileItemReaderBuilder;
+import org.springframework.batch.item.file.mapping.BeanWrapperFieldSetMapper;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.core.io.ClassPathResource;
+
+import com.equifax.personbatch.listener.JobListener;
+import com.equifax.personbatch.model.Person;
+import com.equifax.personbatch.processor.PersonItemProcessor;
+
+@Configuration
+@EnableBatchProcessing
+public class BatchConfiguration {
+	
+	@Autowired
+	public JobBuilderFactory jobBuilderFactory;
+	
+	@Autowired
+	public StepBuilderFactory stepBuilderFactory;
+	
+	@Bean
+	@StepScope
+	public FlatFileItemReader<Person> reader(){
+		return new FlatFileItemReaderBuilder<Person>()
+			   .name("personItemReader")
+			   .resource(getPersonSource())
+			   .delimited().delimiter(",")
+			   .names(PersonItemProcessor.getFieldsName())
+			   .fieldSetMapper(new BeanWrapperFieldSetMapper<Person>() {{
+				   setTargetType(Person.class);
+			   }})
+			   .build();
+	}
+
+	private ClassPathResource getPersonSource() {
+		return new ClassPathResource("sample-data.csv");
+	}
+	
+	@Bean
+	public PersonItemProcessor processor() {
+		return new PersonItemProcessor();
+	}
+	
+	@Bean
+	public JdbcBatchItemWriter<Person> writer(DataSource dataSource){
+		return new JdbcBatchItemWriterBuilder<Person>()
+				.itemSqlParameterSourceProvider(new BeanPropertyItemSqlParameterSourceProvider<>())
+				.sql(PersonItemProcessor.getInsert())
+				.dataSource(dataSource)
+				.build();
+	}
+	
+	@Bean
+	public Job importPersonJob(JobListener listener, Step step1) {
+		return jobBuilderFactory.get("importPersonJob")
+				.incrementer(new RunIdIncrementer())
+				.listener(listener)
+				.flow(step1)
+				.end()
+				.build();
+	}
+	
+	@Bean
+	public Step step1(JdbcBatchItemWriter<Person> writer) {
+		return stepBuilderFactory.get("step1")
+				.<Person, Person> chunk(10)
+				.reader(reader())
+				.processor(processor())
+				.writer(writer)
+				.build();
+	}
+
+}
+
+
+
+
+
+
+
+
+
+
+
+package com.equifax.personbatch;
+
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
+
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+
+import com.equifax.personbatch.model.Person;
+
+@SpringBootApplication
+public class PersonBatchApplication {
+
+	public static void main(String[] args) throws NoSuchMethodException, SecurityException, IllegalAccessException, IllegalArgumentException, InvocationTargetException {
+		SpringApplication.run(PersonBatchApplication.class, args);
+		
+		String datos[] = new String[6];
+		Person person = new Person(new String[] {"doc", "nombre", "apellido", "sexo", "telf", "email"});
+		
+		
+		Method methods[] = getGetMethods();
+		//Method method = Person.class.getMethod("getDocument");
+		//method.invoke(person);
+		System.out.println("antes");
+		for (int i=0 ; i<6 ; i++) {
+			datos[i]=(String) methods[i].invoke(person);
+			System.out.println(methods[i].invoke(person));
+		}
+		System.out.println("desp");
+		
+	}
+	
+	public static Method[] getGetMethods() {
+		Method[] mtd = Person.class.getDeclaredMethods();
+		
+		Method[] methods = new Method[mtd.length];
+		int i=0;
+		for (Method method : mtd) {
+			try {
+				if (method.getName().substring(0, 3).equals("get")) {
+				methods[i++]=method;
+				System.out.println("method: "+method);
+				}
+			} catch (IllegalArgumentException e1) {
+			}     
+        }
+		
+		return methods;
+	}
+
+}
+
+
+
+
+
+
+
+
+
+
+package com.equifax.personbatch.controller;
+
+import org.springframework.batch.core.Job;
+import org.springframework.batch.core.JobParameters;
+import org.springframework.batch.core.JobParametersBuilder;
+import org.springframework.batch.core.launch.JobLauncher;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+@RestController
+public class BatchApi {
+	@Autowired
+	JobLauncher jobLauncher;
+
+	@Autowired
+	Job job;
+
+	@RequestMapping("/PersonProcess")
+	public void handle() throws Exception{
+	       JobParameters jobParameters =
+	                       new JobParametersBuilder()
+	                       .addLong("time",System.currentTimeMillis()).toJobParameters();
+	        jobLauncher.run(job, jobParameters);
+	}
+}
+
+
+
+
+
+
+
+
+
+package com.equifax.personbatch.controller;
+
+import org.springframework.batch.core.Job;
+import org.springframework.batch.core.JobParameters;
+import org.springframework.batch.core.JobParametersBuilder;
+import org.springframework.batch.core.launch.JobLauncher;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+@RestController
+public class BatchApi {
+	@Autowired
+	JobLauncher jobLauncher;
+
+	@Autowired
+	Job job;
+
+	@RequestMapping("/PersonProcess")
+	public void handle() throws Exception{
+	       JobParameters jobParameters =
+	                       new JobParametersBuilder()
+	                       .addLong("time",System.currentTimeMillis()).toJobParameters();
+	        jobLauncher.run(job, jobParameters);
+	}
+}
+
+
+
+
+
+
+package com.equifax.personbatch.model;
+
+public class Person {
+
+	private String document;
+	private String firstName;
+	private String lastName;
+	private String sex;
+	private String telephone;
+	private String email;
+	
+	public Person() {
+		super();
+	}
+	
+	//recibir un map en vez de un array, se setea segun clave valor, ejemplo this.document = map[document];
+	public Person(String [] data) {
+		super();
+		this.document = data[0];
+		this.firstName =  data[1];
+		this.lastName =  data[2];
+		this.sex =  data[3];
+		this.telephone =  data[4];
+		this.email =  data[5];
+	}
+
+	public Person(String document, String firstName, String lastName, String sex, String telephone, String email) {
+		super();
+		this.document = document;
+		this.firstName = firstName;
+		this.lastName = lastName;
+		this.sex = sex;
+		this.telephone = telephone;
+		this.email = email;
+	}
+
+	public String getDocument() {
+		return document;
+	}
+
+
+	public void setDocument(String document) {
+		this.document = document;
+	}
+
+
+	public String getFirstName() {
+		return firstName;
+	}
+
+
+	public void setFirstName(String firstName) {
+		this.firstName = firstName;
+	}
+
+
+	public String getLastName() {
+		return lastName;
+	}
+
+
+	public void setLastName(String lastName) {
+		this.lastName = lastName;
+	}
+
+
+	public String getSex() {
+		return sex;
+	}
+
+
+	public void setSex(String sex) {
+		this.sex = sex;
+	}
+
+
+	public String getTelephone() {
+		return telephone;
+	}
+
+
+	public void setTelephone(String telephone) {
+		this.telephone = telephone;
+	}
+
+
+	public String getEmail() {
+		return email;
+	}
+
+
+	public void setEmail(String email) {
+		this.email = email;
+	}
+
+	@Override
+	public String toString() {
+		return "Person [document=" + document + ", firstName=" + firstName + ", lastName=" + lastName + ", sex=" + sex
+				+ ", telephone=" + telephone + ", email=" + email + "]";
+	}
+
+	
+	
+}
+
+
+
+package com.equifax.personbatch.processor;
+
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.batch.item.ItemProcessor;
+
+import com.equifax.personbatch.model.Person;
+
+public class PersonItemProcessor implements ItemProcessor<Person, Person> {
+	
+	private static final Logger LOG = LoggerFactory.getLogger(PersonItemProcessor.class);
+	
+	@Override
+	public Person process(Person item) throws Exception {
+		
+		String document = item.getDocument();
+		String firstName = item.getFirstName().toUpperCase();
+		String lastName = item.getLastName().toUpperCase();
+		String sex = item.getSex();
+		String telephone = item.getTelephone();
+		String email = item.getEmail();
+		String datos[] = null;
+		
+		//String methods[] = getGetMethods();
+		
+		Method method = Person.class.getMethod("getDocument");
+		for (int i=0 ; i>7 ; i++) {
+			datos[i]="dato";
+		}
+		
+		//Person person = new Person(document, firstName, lastName,sex,telephone,email);
+		//Person person = new Person(new String[] {"eduardo", "mendoza", "24", "fe", "fe", "fe"});
+		
+		Person person = new Person(datos);
+		LOG.info("Change ("+item+") to ("+person+")");
+		
+		return person;
+	}
+	
+	public String dato(){
+		for (int i=0; i>6; i++) {
+			//return "dato";
+		}
+		return "datodato";
+	}
+	
+	public static String[] getGetMethods() {
+		Method[] cls = Person.class.getDeclaredMethods();
+		String[] methods = new String[cls.length];
+		int i=0;
+		for (Method method : cls) {
+			try {
+				methods[i++]=method.getName();
+			} catch (IllegalArgumentException e1) {
+			}     
+        }
+		
+		return methods;
+	}
+	
+	public static String[] getFieldsName() {
+		Field[] cls = Person.class.getDeclaredFields();
+		String[] fields = new String[cls.length];
+		int i=0;
+		for (Field field : cls) {
+			try {
+				fields[i++]=field.getName();
+			} catch (IllegalArgumentException e1) {
+			}     
+        }
+		
+		return fields;
+	}
+	
+	public static String getInsert() {
+		
+		Person person = new Person();
+		Field[] cls = person.getClass().getDeclaredFields();
+		String sql="";
+		String fieldCharacterAdd=new String();
+		String fields=new String();
+		String data="";
+		char character[];
+		int pos = 0;
+		boolean haveUpper=false;
+		boolean isUpper;
+		
+		for (Field field : cls) {
+			try {
+				data+=getFieldsName(field);
+				character=fieldsNameToCharArray(field);
+				for (int i=0 ; i<field.getName().length(); i++) {
+					isUpper=isUpper(character, i);
+					if (isUpper) {
+						haveUpper=true;
+						character[i]=toLowerCharacter(character, i);
+						pos=i-1;
+					}
+				}
+				fieldCharacterAdd="";
+				for (int i=0 ; i<new String(character).length(); i++) {
+					fieldCharacterAdd += getNewStrinCharacterPart(character, i);
+					if (i == pos && haveUpper) { 
+						fieldCharacterAdd+= "_";
+						haveUpper=false;
+		            } 
+				}
+				fields+= addField(fieldCharacterAdd);
+			} catch (IllegalArgumentException e1) {
+			}     
+        }
+		data=cleanData(data);
+		fields=cleanData(fields);
+		sql+=getSql(fields, data);
+		return sql;
+	}
+
+	private static String getSql(String fields, String data) {
+		return "INSERT INTO person ("+fields+") VALUES ("+data+")";
+	}
+
+	private static String cleanData(String data) {
+		return data.substring(0, data.length()-2);
+	}
+
+	private static String addField(String fieldCharacterAdd) {
+		return new String(fieldCharacterAdd)+", ";
+	}
+
+	private static char getNewStrinCharacterPart(char[] character, int i) {
+		return new String(character).charAt(i);
+	}
+
+	private static char toLowerCharacter(char[] character, int i) {
+		return (char) (Character.toLowerCase(character[i]));
+	}
+
+	private static boolean isUpper(char[] character, int i) {
+		return (Character.isUpperCase(character[i])) ? true: false;
+	}
+
+	private static char[] fieldsNameToCharArray(Field field) {
+		return field.getName().toCharArray();
+	}
+
+	private static String getFieldsName(Field field) {
+		return ":"+field.getName()+", ";
+	}
+
+}
+
+
+
+aplication.properties
+application.properties
+# SPRING BATCH (BatchDatabaseInitializer)
+spring.batch.job.enabled=false
+spring.batch.initializer.enabled=false
+
+
+313121201,Jordy,Rodriguez,M,112493543,Jordy@email.com
+301912120,Carlos,Jimenez,M,112492543,Carlos@email.com
+312141249,Jhon,Calvo,M,112443533,Jhon@email.com
+523112178,Christian,Lopez,M,111043543,Christian@email.com
+232342344,Laura,Milan,M,112422443,Laura@email.com
+236545645,Maria,Perez,M,112443545,Maria@email.com
+237655223,Belen,Gonzalez,M,1124438973,Belen@email.com
+237867221,Rodrigo,Gutierrez,M,112443003,Rodrigo@email.com
+979788712,Maru,Vera,M,112443511,Maru@email.com
+479789312,Angela,Bautista,M,112363543,Angela@email.com
+378973122,Veronica,Ponce,M,112444943,Veronica@email.com
+342098312,Roberto,Cano,M,112443943,Roberto@email.com
+
+
+DROP TABLE person IF EXISTS;
+
+CREATE TABLE person(
+  id BIGINT IDENTITY NOT NULL PRIMARY KEY,
+  document VARCHAR(20),
+  first_name VARCHAR(20),
+  last_name VARCHAR(20),
+  sex VARCHAR(20),
+  telephone VARCHAR(10),
+  email VARCHAR(20)
+);
+
+
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+	<modelVersion>4.0.0</modelVersion>
+	<parent>
+		<groupId>org.springframework.boot</groupId>
+		<artifactId>spring-boot-starter-parent</artifactId>
+		<version>2.1.3.RELEASE</version>
+		<relativePath/> <!-- lookup parent from repository -->
+	</parent>
+	<groupId>com.example</groupId>
+	<artifactId>person-spring-batch</artifactId>
+	<version>0.0.1-SNAPSHOT</version>
+	<name>demo-spring-batch</name>
+	<description>People batch processing</description>
+
+	<properties>
+		<java.version>1.8</java.version>
+	</properties>
+
+	<dependencies>
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-batch</artifactId>
+		</dependency>
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-web</artifactId>
+		</dependency>
+		<dependency>
+			<groupId>org.hsqldb</groupId>
+			<artifactId>hsqldb</artifactId>
+			<scope>runtime</scope>
+		</dependency>
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-test</artifactId>
+			<scope>test</scope>
+		</dependency>
+		<dependency>
+			<groupId>org.springframework.batch</groupId>
+			<artifactId>spring-batch-test</artifactId>
+			<scope>test</scope>
+		</dependency>
+		<!-- https://mvnrepository.com/artifact/org.springframework/spring-web -->
+		<dependency>
+		    <groupId>org.springframework</groupId>
+		    <artifactId>spring-web</artifactId>
+		</dependency>
+		<!-- https://mvnrepository.com/artifact/org.springframework.batch/spring-batch-admin-manager -->
+		<dependency>
+		    <groupId>org.springframework.batch</groupId>
+		    <artifactId>spring-batch-admin-manager</artifactId>
+		    <version>1.3.1.RELEASE</version>
+		</dependency>
+	</dependencies>
+
+	<build>
+		<plugins>
+			<plugin>
+				<groupId>org.springframework.boot</groupId>
+				<artifactId>spring-boot-maven-plugin</artifactId>
+			</plugin>
+		</plugins>
+	</build>
+
+</project>
+
